@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vocab Learning Platform</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    body { font-family: Arial, sans-serif; background:#f7f7f7; margin:0; padding:20px; }
+    h1 { text-align:center; }
+    .card { background:#fff; padding:20px; margin:10px auto; max-width:900px; border-radius:10px; box-shadow:0 0 5px rgba(0,0,0,0.1); }
+    input, textarea, select { width:100%; padding:8px; margin:5px 0 15px; border-radius:5px; border:1px solid #ccc; }
+    button { padding:8px 16px; background:#4CAF50; color:#fff; border:none; border-radius:5px; cursor:pointer; margin:5px 5px 5px 0; }
+    button:hover { background:#45a049; }
+    nav { text-align:center; margin-bottom:20px; }
+    nav button { margin:0 5px; }
+    .hidden { display:none; }
+    .word-card { background:#fff; padding:15px; margin-bottom:10px; border-radius:8px; box-shadow:0 0 5px rgba(0,0,0,0.1); }
+    .correct { color:green; font-weight:bold; }
+    .incorrect { color:red; font-weight:bold; }
+    .chart-container { background:#fff; padding:20px; margin-top:20px; border-radius:10px; box-shadow:0 0 5px rgba(0,0,0,0.1); }
+</style>
+</head>
+<body>
+
+<h1>Vocab Learning Platform</h1>
+
+<nav id="nav" class="hidden">
+    <button onclick="showSection('studentDashboard')">Student</button>
+    <button onclick="showSection('dashboard')">Dashboard</button>
+    <button onclick="showSection('adminDashboard')">Admin</button>
+    <button onclick="showSection('parentDashboard')">Parent</button>
+    <button onclick="logout()">Logout</button>
+</nav>
+
+<!-- Auth -->
+<div id="authCard" class="card">
+    <h2>Login / Sign Up</h2>
+    <label>Email</label>
+    <input type="email" id="email">
+    <label>Password</label>
+    <input type="password" id="password">
+    <button onclick="login()">Login</button>
+    <button onclick="signup()">Sign Up (Student)</button>
+</div>
+
+<!-- Student Dashboard -->
+<div id="studentDashboard" class="card hidden">
+    <h2>Student Dashboard</h2>
+    <p>Logged in as: <strong><span id="studentEmailLabel"></span></strong></p>
+    <button onclick="showSection('dailyEntry')">Daily Entry (10 new words)</button>
+    <button onclick="openStudyFromDashboard()">Study</button>
+    <button onclick="openTestFromDashboard()">Test</button>
+    <button onclick="showSection('reviewPage')">20-Word Review</button>
+</div>
+
+<!-- Daily Entry -->
+<div id="dailyEntry" class="card hidden">
+    <h2>Daily Entry – 10 New Words</h2>
+    <div id="formContainer"></div>
+    <button onclick="saveWords()">Save Today’s 10 Words</button>
+</div>
+
+<!-- Study Page -->
+<div id="studyPage" class="card hidden">
+    <h2>Study Page</h2>
+    <h3 id="studyDate"></h3>
+    <label>Select a word:</label>
+    <select id="studyWordSelect" onchange="loadStudyWordData()"></select>
+    <label>Original text:</label>
+    <textarea id="originalText" rows="5"></textarea>
+    <button onclick="translateStudyText()">Translate</button>
+    <label>Translation:</label>
+    <textarea id="translatedText" rows="5"></textarea>
+    <button onclick="showSection('testPage')">Go to Testing Page</button>
+</div>
+
+<!-- Test Page -->
+<div id="testPage" class="card hidden">
+    <h2>Testing Page</h2>
+    <h3 id="testDate"></h3>
+    <div id="testContainer"></div>
+    <button onclick="goToResultPage()">Go to Result Page</button>
+</div>
+
+<!-- Result Page -->
+<div id="resultPage" class="card hidden">
+    <h2>Result Page</h2>
+    <h3 id="resultDate"></h3>
+    <div id="manualContainer"></div>
+    <h2>Part 2 — Auto Scoring</h2>
+    <p><strong>Correct Words:</strong> <span id="correctWords"></span></p>
+    <p><strong>Wrong Words:</strong> <span id="wrongWords"></span></p>
+    <p><strong>Percentage:</strong> <span id="percentage"></span>%</p>
+    <button onclick="saveResults()">Save Results</button>
+</div>
+
+<!-- Review Page -->
+<div id="reviewPage" class="card hidden">
+    <h2>20-Word Review</h2>
+    <div id="reviewContainer"></div>
+    <button onclick="finishReview()">Finish Review</button>
+    <div id="reviewResultSection"></div>
+</div>
+
+<!-- Dashboard (charts + dates) -->
+<div id="dashboard" class="card hidden">
+    <h2>Dashboard</h2>
+    <h3>Daily History</h3>
+    <div id="dateList"></div>
+    <div class="chart-container">
+        <h3>10 New Words Correct % Trend</h3>
+        <canvas id="newWordsChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3>20 Review Words Correct % Trend</h3>
+        <canvas id="reviewWordsChart"></canvas>
+    </div>
+</div>
+
+<!-- Admin Dashboard -->
+<div id="adminDashboard" class="card hidden">
+    <h2>Admin Dashboard</h2>
+    <p>You are logged in as <strong>Admin</strong>.</p>
+    <div id="adminStudents"></div>
+</div>
+
+<!-- Parent Dashboard -->
+<div id="parentDashboard" class="card hidden">
+    <h2>Parent Dashboard</h2>
+    <p>You are logged in as <strong>Parent</strong>.</p>
+    <div id="parentStudents"></div>
+</div>
+
+<script>
+// ---------- CONFIG ----------
+const ADMIN_PASSWORD = "b@R0n20091126vocab";
+const PARENT_EMAILS = ["maggie_8228@hotmail.com", "edward_jiang@hotmail.com"];
+
+// ---------- UTIL ----------
+function hashPassword(pw) {
+    let hash = 0;
+    for (let i = 0; i < pw.length; i++) {
+        hash = ((hash << 5) - hash) + pw.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash.toString();
+}
+
+function getUsers() {
+    return JSON.parse(localStorage.getItem("users") || "[]");
+}
+function saveUsers(users) {
+    localStorage.setItem("users", JSON.stringify(users));
+}
+function setCurrentUser(user) {
+    localStorage.setItem("currentUser", JSON.stringify(user));
+}
+function getCurrentUser() {
+    return JSON.parse(localStorage.getItem("currentUser") || "null");
+}
+function logout() {
+    localStorage.removeItem("currentUser");
+    document.getElementById("nav").classList.add("hidden");
+    showSection(null);
+    document.getElementById("authCard").classList.remove("hidden");
+}
+
+// prefix keys per student
+function getKey(prefix) {
+    const user = getCurrentUser();
+    if (!user) return prefix;
+    return prefix + "_" + user.email;
+}
+
+// ---------- AUTH ----------
+function login() {
+    const email = document.getElementById("email").value.trim().toLowerCase();
+    const password = document.getElementById("password").value;
+
+    if (!email || !password) {
+        alert("Enter email and password.");
+        return;
+    }
+
+    // Admin login
+    if (password === ADMIN_PASSWORD) {
+        const adminUser = { email, role: "admin" };
+        setCurrentUser(adminUser);
+        onLogin();
+        return;
+    }
+
+    const users = getUsers();
+    const user = users.find(u => u.email === email);
+
+    if (!user) {
+        alert("User not found. Sign up first.");
+        return;
+    }
+
+    if (user.passwordHash !== hashPassword(password)) {
+        alert("Incorrect password.");
+        return;
+    }
+
+    setCurrentUser(user);
+    onLogin();
+}
+
+function signup() {
+    const email = document.getElementById("email").value.trim().toLowerCase();
+    const password = document.getElementById("password").value;
+
+    if (!email || !password) {
+        alert("Enter email and password.");
+        return;
+    }
+
+    if (PARENT_EMAILS.includes(email)) {
+        alert("This email is reserved for parents. Use login.");
+        return;
+    }
+
+    const users = getUsers();
+    if (users.some(u => u.email === email)) {
+        alert("User already exists. Use login.");
+        return;
+    }
+
+    const newUser = {
+        email,
+        role: "student",
+        passwordHash: hashPassword(password)
+    };
+    users.push(newUser);
+    saveUsers(users);
+    setCurrentUser(newUser);
+    onLogin();
+}
+
+function onLogin() {
+    const user = getCurrentUser();
+    if (!user) return;
+
+    document.getElementById("authCard").classList.add("hidden");
+    document.getElementById("nav").classList.remove("hidden");
+
+    if (user.role === "admin") {
+        showSection("adminDashboard");
+        loadAdminDashboard();
+    } else if (PARENT_EMAILS.includes(user.email)) {
+        user.role = "parent";
+        setCurrentUser(user);
+        showSection("parentDashboard");
+        loadParentDashboard();
+    } else if (user.role === "student") {
+        showSection("studentDashboard");
+        loadStudentDashboard();
+        createForm();
+        loadDates();
+        buildNewWordsChart();
+        buildReviewWordsChart();
+    } else {
+        alert("Unknown role.");
+        logout();
+    }
+}
+
+function showSection(id) {
+    ["studentDashboard","dailyEntry","studyPage","testPage","resultPage","reviewPage","dashboard","adminDashboard","parentDashboard"]
+        .forEach(sec => document.getElementById(sec).classList.add("hidden"));
+    if (id) document.getElementById(id).classList.remove("hidden");
+}
+
+// ---------- ADMIN DASHBOARD ----------
+function loadAdminDashboard() {
+    const users = getUsers();
+    const students = users.filter(u => u.role === "student");
+    const div = document.getElementById("adminStudents");
+    div.innerHTML = "<h3>Students</h3>";
+    students.forEach(s => {
+        div.innerHTML += `<p>${s.email}</p>`;
+    });
+}
+
+// ---------- PARENT DASHBOARD ----------
+function loadParentDashboard() {
+    const users = getUsers();
+    const students = users.filter(u => u.role === "student");
+    const div = document.getElementById("parentStudents");
+    div.innerHTML = "<h3>Students</h3><p>Parents can review performance here.</p>";
+    students.forEach(s => {
+        div.innerHTML += `<p>${s.email}</p>`;
+    });
+}
+
+// ---------- STUDENT DASHBOARD ----------
+function loadStudentDashboard() {
+    const user = getCurrentUser();
+    document.getElementById("studentEmailLabel").textContent = user.email;
+}
+
+// ---------- DAILY ENTRY ----------
+function createForm() {
+    const container = document.getElementById("formContainer");
+    container.innerHTML = "";
+    for (let i = 1; i <= 10; i++) {
+        container.innerHTML += `
+            <div class="word-card">
+                <h3>Word ${i}</h3>
+                <label>Word</label>
+                <input type="text" id="word_${i}">
+                <label>Definition (Merriam-Webster)</label>
+                <textarea id="definition_${i}"></textarea>
+                <label>Pronunciation</label>
+                <input type="text" id="pronunciation_${i}">
+                <label>Sentence You Found It In</label>
+                <textarea id="sourceSentence_${i}"></textarea>
+                <label>Example Sentence (Merriam-Webster)</label>
+                <textarea id="exampleSentence_${i}"></textarea>
+            </div>
+        `;
+    }
+}
+
+function getStoredWords() {
+    return JSON.parse(localStorage.getItem(getKey("vocabWords")) || "[]");
+}
+
+function saveWords() {
+    let storedWords = getStoredWords();
+    let newWords = [];
+
+    for (let i = 1; i <= 10; i++) {
+        let word = document.getElementById(`word_${i}`).value.trim().toLowerCase();
+        if (!word) continue;
+
+        if (storedWords.some(w => w.word === word)) {
+            alert(`Duplicate word found: "${word}". Please replace it.`);
+            return;
+        }
+
+        newWords.push({
+            word,
+            definition: document.getElementById(`definition_${i}`).value.trim(),
+            pronunciation: document.getElementById(`pronunciation_${i}`).value.trim(),
+            sourceSentence: document.getElementById(`sourceSentence_${i}`).value.trim(),
+            exampleSentence: document.getElementById(`exampleSentence_${i}`).value.trim(),
+            dateAdded: new Date().toISOString().split("T")[0]
+        });
+    }
+
+    if (newWords.length !== 10) {
+        alert("You must enter exactly 10 words.");
+        return;
+    }
+
+    storedWords.push(...newWords);
+    localStorage.setItem(getKey("vocabWords"), JSON.stringify(storedWords));
+
+    alert("Today's 10 words saved!");
+    createForm();
+    loadDates();
+    buildNewWordsChart();
+}
+
+// ---------- STUDY PAGE ----------
+function openStudyFromDashboard() {
+    const today = new Date().toISOString().split("T")[0];
+    openStudyForDate(today);
+}
+function openStudyForDate(date) {
+    showSection("studyPage");
+    document.getElementById("studyDate").textContent = "Studying words from: " + date;
+    const wordsForDate = getStoredWords().filter(w => w.dateAdded === date);
+    const select = document.getElementById("studyWordSelect");
+    select.innerHTML = "";
+    wordsForDate.forEach(w => {
+        const option = document.createElement("option");
+        option.value = w.word;
+        option.textContent = w.word;
+        select.appendChild(option);
+    });
+    window.studyWordsForDate = wordsForDate;
+    loadStudyWordData();
+}
+
+function loadStudyWordData() {
+    const selectedWord = document.getElementById("studyWordSelect").value;
+    const wordData = window.studyWordsForDate.find(w => w.word === selectedWord);
+    document.getElementById("originalText").value =
+        wordData.sourceSentence + "\n\n" + wordData.exampleSentence;
+}
+
+async function translateStudyText() {
+    const text = document.getElementById("originalText").value;
+    const url =
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh&dt=t&q=" +
+        encodeURIComponent(text);
+    const response = await fetch(url);
+    const data = await response.json();
+    const translated = data[0].map(item => item[0]).join("");
+    document.getElementById("translatedText").value = translated;
+}
+
+// ---------- TEST PAGE ----------
+function openTestFromDashboard() {
+    const today = new Date().toISOString().split("T")[0];
+    openTestForDate(today);
+}
+function openTestForDate(date) {
+    showSection("testPage");
+    document.getElementById("testDate").textContent = "Testing words from: " + date;
+    const wordsForDate = getStoredWords().filter(w => w.dateAdded === date);
+    window.testWordsForDate = wordsForDate;
+    loadTestingCards();
+}
+
+async function translateToChinese(text) {
+    const url =
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh&dt=t&q=" +
+        encodeURIComponent(text);
+    const response = await fetch(url);
+    const data = await response.json();
+    return data[0].map(item => item[0]).join("");
+}
+
+async function loadTestingCards() {
+    const container = document.getElementById("testContainer");
+    container.innerHTML = "";
+    const wordsForDate = window.testWordsForDate;
+    window.autoTestResults = { correct: [], wrong: [], percentage: 0 };
+
+    for (const w of wordsForDate) {
+        const chinese = await translateToChinese(
+            w.sourceSentence + "\n" + w.exampleSentence
+        );
+
+        const div = document.createElement("div");
+        div.className = "word-card";
+
+        div.innerHTML = `
+            <h3>Part 1: English Review</h3>
+            <p><strong>Word:</strong> ${w.word}</p>
+            <p><strong>Your Sentence:</strong><br>${w.sourceSentence}</p>
+            <p><strong>Merriam-Webster Example:</strong><br>${w.exampleSentence}</p>
+            <hr>
+            <h3>Part 2: 默写 (Chinese → English)</h3>
+            <p><strong>Chinese Translation:</strong><br>${chinese}</p>
+            <input type="text" id="input_${w.word}" placeholder="Enter the English word">
+            <button onclick="checkAnswer('${w.word}')">Check</button>
+            <p id="result_${w.word}"></p>
+        `;
+        container.appendChild(div);
+    }
+}
+
+function checkAnswer(correctWord) {
+    const input = document.getElementById(`input_${correctWord}`).value.trim().toLowerCase();
+    const result = document.getElementById(`result_${correctWord}`);
+    if (input === correctWord.toLowerCase()) {
+        result.textContent = "Correct!";
+        result.className = "correct";
+        if (!window.autoTestResults.correct.includes(correctWord))
+            window.autoTestResults.correct.push(correctWord);
+        window.autoTestResults.wrong = window.autoTestResults.wrong.filter(w => w !== correctWord);
+    } else {
+        result.textContent = "Incorrect";
+        result.className = "incorrect";
+        if (!window.autoTestResults.wrong.includes(correctWord))
+            window.autoTestResults.wrong.push(correctWord);
+        window.autoTestResults.correct = window.autoTestResults.correct.filter(w => w !== correctWord);
+    }
+    const total = window.testWordsForDate.length;
+    const correctCount = window.autoTestResults.correct.length;
+    window.autoTestResults.percentage = Math.round((correctCount / total) * 100);
+    localStorage.setItem(getKey("autoTestResults"), JSON.stringify(window.autoTestResults));
+}
+
+function goToResultPage() {
+    showSection("resultPage");
+    const today = new Date().toISOString().split("T")[0];
+    document.getElementById("resultDate").textContent = "Results for: " + today;
+    loadManualInputs(today);
+    loadAutoResults();
+}
+
+// ---------- RESULT PAGE ----------
+function getAutoResults() {
+    return JSON.parse(localStorage.getItem(getKey("autoTestResults")) || "{}");
+}
+function getSavedResults() {
+    return JSON.parse(localStorage.getItem(getKey("vocabResults")) || "[]");
+}
+
+function loadManualInputs(date) {
+    const wordsForDate = getStoredWords().filter(w => w.dateAdded === date);
+    window.resultWordsForDate = wordsForDate;
+    const container = document.getElementById("manualContainer");
+    container.innerHTML = "";
+    wordsForDate.forEach(w => {
+        const div = document.createElement("div");
+        div.className = "word-card";
+        div.innerHTML = `
+            <h3>${w.word}</h3>
+            <label>Translation Score (1–5)</label>
+            <input type="number" id="trans_${w.word}" min="1" max="5">
+            <label>Pronunciation Score (1–5)</label>
+            <input type="number" id="pron_${w.word}" min="1" max="5">
+        `;
+        container.appendChild(div);
+    });
+}
+
+function loadAutoResults() {
+    const auto = getAutoResults();
+    document.getElementById("correctWords").textContent = (auto.correct || []).join(", ");
+    document.getElementById("wrongWords").textContent = (auto.wrong || []).join(", ");
+    document.getElementById("percentage").textContent = auto.percentage || 0;
+}
+
+function saveResults() {
+    const wordsForDate = window.resultWordsForDate;
+    const auto = getAutoResults();
+    const today = new Date().toISOString().split("T")[0];
+
+    const manualScores = wordsForDate.map(w => ({
+        word: w.word,
+        translationScore: Number(document.getElementById(`trans_${w.word}`).value),
+        pronunciationScore: Number(document.getElementById(`pron_${w.word}`).value)
+    }));
+
+    const resultData = {
+        date: today,
+        manualScores,
+        autoScores: auto
+    };
+
+    const saved = getSavedResults();
+    saved.push(resultData);
+    localStorage.setItem(getKey("vocabResults"), JSON.stringify(saved));
+
+    alert("Results saved!");
+    buildNewWordsChart();
+}
+
+// ---------- REVIEW PAGE ----------
+function getReviewResults() {
+    return JSON.parse(localStorage.getItem(getKey("vocabReviewResults")) || "[]");
+}
+
+function loadReviewCards() {
+    const allWords = getStoredWords();
+    const shuffled = [...allWords].sort(() => Math.random() - 0.5);
+    const reviewWords = shuffled.slice(0, 20);
+    window.reviewWords = reviewWords;
+
+    const container = document.getElementById("reviewContainer");
+    container.innerHTML = "";
+    reviewWords.forEach(async w => {
+        const chinese = await translateToChinese(
+            w.sourceSentence + "\n" + w.exampleSentence
+        );
+        const div = document.createElement("div");
+        div.className = "word-card";
+        div.innerHTML = `
+            <p><strong>Chinese:</strong><br>${chinese}</p>
+            <input type="text" id="review_input_${w.word}" placeholder="Enter English word">
+            <p id="review_result_${w.word}"></p>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function finishReview() {
+    const reviewWords = window.reviewWords || [];
+    let correct = [];
+    let wrong = [];
+
+    reviewWords.forEach(w => {
+        const input = document.getElementById(`review_input_${w.word}`).value.trim().toLowerCase();
+        const result = document.getElementById(`review_result_${w.word}`);
+        if (input === w.word.toLowerCase()) {
+            correct.push(w.word);
+            result.textContent = "Correct!";
+            result.className = "correct";
+        } else {
+            wrong.push(w.word);
+            result.textContent = "Incorrect";
+            result.className = "incorrect";
+        }
+    });
+
+    const percentage = reviewWords.length ? Math.round((correct.length / reviewWords.length) * 100) : 0;
+
+    const reviewData = {
+        date: new Date().toISOString().split("T")[0],
+        correct,
+        wrong,
+        percentage
+    };
+
+    const saved = getReviewResults();
+    saved.push(reviewData);
+    localStorage.setItem(getKey("vocabReviewResults"), JSON.stringify(saved));
+
+    document.getElementById("reviewResultSection").innerHTML = `
+        <h3>Review Results</h3>
+        <p><strong>Correct:</strong> ${correct.join(", ")}</p>
+        <p><strong>Wrong:</strong> ${wrong.join(", ")}</p>
+        <p><strong>Percentage:</strong> ${percentage}%</p>
+    `;
+    buildReviewWordsChart();
+}
+
+// ---------- DASHBOARD ----------
+function loadDates() {
+    const words = getStoredWords();
+    const dateList = document.getElementById("dateList");
+    dateList.innerHTML = "";
+    const dates = [...new Set(words.map(w => w.dateAdded))];
+    dates.sort().reverse();
+    dates.forEach(date => {
+        const div = document.createElement("div");
+        div.className = "word-card";
+        div.textContent = date;
+        div.onclick = () => openStudyForDate(date);
+        dateList.appendChild(div);
+    });
+}
+
+function buildNewWordsChart() {
+    const results = getSavedResults();
+    const ctx = document.getElementById("newWordsChart");
+    if (!ctx) return;
+    const dates = results.map(r => r.date);
+    const percentages = results.map(r => r.autoScores.percentage || 0);
+
+    new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: dates,
+            datasets: [{
+                label: "Correct %",
+                data: percentages,
+                borderColor: "blue",
+                backgroundColor: "rgba(0,0,255,0.1)",
+                borderWidth: 2,
+                tension: 0.3
+            }]
+        },
+        options: {
+            scales: { y: { beginAtZero: true, max: 100 } }
+        }
+    });
+}
+
+function buildReviewWordsChart() {
+    const results = getReviewResults();
+    const ctx = document.getElementById("reviewWordsChart");
+    if (!ctx) return;
+    const dates = results.map(r => r.date);
+    const percentages = results.map(r => r.percentage || 0);
+
+    new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: dates,
+            datasets: [{
+                label: "Correct %",
+                data: percentages,
+                borderColor: "green",
+                backgroundColor: "rgba(0,255,0,0.1)",
+                borderWidth: 2,
+                tension: 0.3
+            }]
+        },
+        options: {
+            scales: { y: { beginAtZero: true, max: 100 } }
+        }
+    });
+}
+
+// ---------- INIT ----------
+(function init() {
+    const user = getCurrentUser();
+    if (user) onLogin();
+    else createForm();
+    loadReviewCards();
+})();
+</script>
+
+</body>
+</html>
